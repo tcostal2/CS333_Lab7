@@ -6,6 +6,9 @@
 #include<netinet/in.h>
 #include<sys/socket.h>
 #include<string.h>
+#include<poll.h>
+#include<fcntl.h>
+#include<ncurses.h>
 
 #include "ASCIIlosaurus_world.h"
 
@@ -19,7 +22,11 @@ int main(int argc, char* argv[]){
 	int sockfd; 
 	int port = DEFAULT_PORT;
 	struct sockaddr_in server_addr;
+	struct sockaddr_in src_addr;
 	char* ip_addr = DEFAULT_HOST;
+	world_state_t world;
+	bool running = true;
+	int flags;
 
 	while((opt = getopt(argc, argv, OPTIONS)) != -1){
 		switch(opt){
@@ -31,6 +38,7 @@ int main(int argc, char* argv[]){
 				break;
 			case 'v': 
 				is_verbose = true;
+				fprintf(stderr, "%d is enabled\n", is_verbose);
 				break;
 			case 'h':
 				fprintf(stderr, "Helpful text\n");
@@ -38,6 +46,7 @@ int main(int argc, char* argv[]){
 				break;
 			default:
 				fprintf(stderr, "Invalid option\n");
+				exit(EXIT_FAILURE);
 				break;
 
 		}
@@ -52,5 +61,45 @@ int main(int argc, char* argv[]){
 	server_addr.sin_port = htons(port);
 	inet_pton(AF_INET, ip_addr, &server_addr.sin_addr);
 
+	flags = fcntl(sockfd, F_GETFL, 0);
+	if(flags == -1){
+		perror("F_GETFL\n");
+		exit(EXIT_FAILURE);
+	}
+	flags |= O_NONBLOCK;
+	if(fcntl(sockfd, F_SETFL, flags) == -1){
+		perror("F_SETFL\n");
+		exit(EXIT_FAILURE);
+	}
+	
+	
+	setup_ui();
+	while(running){
+
+		int userinpt = get_input();
+		socklen_t addlen_src = sizeof(src_addr);
+		if(userinpt == 'q'){
+			running = false;
+		}
+
+		if(userinpt != ERR){
+			sendto(sockfd, &userinpt, sizeof(int), 0, (struct sockaddr *)&server_addr, sizeof(server_addr)); 
+		}
+
+		if(recvfrom(sockfd, &world, sizeof(world), 0, (struct sockaddr *)&src_addr, &addlen_src) != -1){
+
+			for(int i = 0; i < MAX_PLAYERS; i++){
+				if(world.players[i].active){
+					world.players[i].x  = ntohl(world.players[i].x);
+					world.players[i].y = ntohl(world.players[i].y);
+				}
+			}
+
+			draw_world(&world);
+		}
+	}
+
+	teardown_ui();
+	close(sockfd);
 	exit(EXIT_SUCCESS);
 }

@@ -88,6 +88,7 @@ int main(int argc, char* argv[]){
 
 		if(recvfrom(sockfd, &world, sizeof(world), 0, (struct sockaddr *)&src_addr, &addlen_src) != -1){
 
+
 			for(int i = 0; i < MAX_PLAYERS; i++){
 				if(world.players[i].active){
 					world.players[i].x  = ntohl(world.players[i].x);

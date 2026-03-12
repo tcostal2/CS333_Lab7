@@ -31,12 +31,13 @@ int main(int argc, char* argv[]){
 	int port = DEFAULT_PORT;
 	struct sockaddr_in server_addr;
 	struct sockaddr_in src_addr;
-	struct sockaddr_in clients[MAX_PLAYERS];
 	world_state_t world;
 	struct sigaction sig;
 	struct pollfd fds[2];
 	int user_inpt=0;
-	socklen_t addrlen = sizeof(src_addr);
+	struct sockaddr_in clients[MAX_PLAYERS];
+	socklen_t addrlen;
+	memset(clients, 0, sizeof(clients));
 
 	while((opt = getopt(argc, argv, OPTIONS)) != -1){
 		switch(opt){
@@ -45,7 +46,6 @@ int main(int argc, char* argv[]){
 				break;
 			case 'v': 
 				is_verbose = true;
-				fprintf(stderr, "%d is enabled\n", is_verbose);
 				break;
 			case 'h':
 				fprintf(stderr, "Helpful text\n");
@@ -82,9 +82,8 @@ int main(int argc, char* argv[]){
 	fds[1].events = POLLIN;
 
 	while(keep_running){
-		int playerindx = -1;
-		int freeslot = -1;
 		world_state_t updated_world;
+		addrlen = sizeof(src_addr);
 
 		if(poll(fds, 2, -1) > 0){
 			if(fds[0].revents & POLLIN){
@@ -95,19 +94,43 @@ int main(int argc, char* argv[]){
 			}
 			if(fds[1].revents & POLLIN){
 				if(recvfrom(sockfd, &user_inpt, sizeof(int), 0, (struct sockaddr*)&src_addr, &addrlen) != -1){
+					int playerindx = -1;
+					int freeslot = -1;
+					if(is_verbose){
+						fprintf(stderr, "packet from %s, %d, key %d\n", inet_ntoa(src_addr.sin_addr),
+							ntohs(src_addr.sin_port),
+							user_inpt);
+					}
+
 					for(int i = 0; i < MAX_PLAYERS; i++){
-						if(world.players[i].active && clients[i].sin_port == src_addr.sin_port && clients[i].sin_addr.s_addr == src_addr.sin_addr.s_addr){
+						if(world.players[i].active && 
+								ntohs(clients[i].sin_port) == ntohs(src_addr.sin_port) && 
+								clients[i].sin_addr.s_addr == src_addr.sin_addr.s_addr){
 							playerindx =i;
-							break;
 						}
-						else if (!world.players[i].active){
+						if (!world.players[i].active){
 							if(freeslot == -1){
 								freeslot = i;
 							}
 						}
 					}
+
+					//new player
+					if(playerindx == -1 && freeslot != -1){
+						if(is_verbose){
+							fprintf(stderr, "new player slot %d\n", freeslot);
+						}
+
+						world.players[freeslot].active = true;
+						world.players[freeslot].x = freeslot;
+						world.players[freeslot].y = freeslot;
+						world.players[freeslot].symbol = 'A' + freeslot;
+						clients[freeslot] = src_addr;
+						playerindx = freeslot;
+					}
+
 					//existing player
-					if(playerindx != -1){
+					else if(playerindx != -1){
 						if(user_inpt == 'w' || user_inpt == 'k' || user_inpt == KEY_UP){
 							world.players[playerindx].y -= 1;
 							if(world.players[playerindx].y < 0){
@@ -137,14 +160,6 @@ int main(int argc, char* argv[]){
 						}
 					}
  
-					//new player
-					if(playerindx == -1 && freeslot != -1){
-						world.players[freeslot].active = true;
-						world.players[freeslot].x = GRID_W -1;
-						world.players[freeslot].y = GRID_H -1;
-						world.players[freeslot].symbol = 'A' + freeslot;
-						clients[freeslot] = src_addr;
-					}
 					 
 					updated_world = world;
 
@@ -158,6 +173,7 @@ int main(int argc, char* argv[]){
 					//send to all player clients
 					for(int i =0; i < MAX_PLAYERS; i++){
 						if(world.players[i].active){
+							updated_world.client_char = world.players[i].symbol;
 							sendto(sockfd, &updated_world, sizeof(updated_world), 0, (struct sockaddr*)&clients[i], sizeof(clients[i]));
 						}
 					}
